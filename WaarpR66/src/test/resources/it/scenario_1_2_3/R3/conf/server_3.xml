@@ -83,7 +83,7 @@
         <delayretry>10000</delayretry>
         <digest>7</digest>
         <globaldigest>True</globaldigest>
-        <localdigest>True</localdigest>
+        <localdigest>False</localdigest>
         <runlimit>1000</runlimit>
     </limit>
     <db>

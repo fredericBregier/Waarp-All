@@ -86,9 +86,9 @@ public abstract class ScenarioBase extends TestAbstract {
       "/tmp/R66/scenario_1_2_3/R1";
   private static final String TMP_R66_CONFIG_R1 =
       "/tmp/R66/scenario_1_2_3/" + SERVER_1_REWRITTEN_XML;
-  public static int NUMBER_FILES = 50;
-  public static int LARGE_SIZE = 2000000;
-  public static int BLOCK_SIZE = 8192;
+  public static int NUMBER_FILES = 3000;
+  public static int LARGE_SIZE = 360 * 1024;
+  public static int BLOCK_SIZE = 65536;
 
   private static int r66Pid1 = 999999;
   private static int r66Pid2 = 999999;
@@ -387,6 +387,70 @@ public abstract class ScenarioBase extends TestAbstract {
   }
 
   @Test
+  public void test021_MultipleSends() throws IOException, InterruptedException {
+    logger.warn("Start {} {}", Processes.getCurrentMethodName(), NUMBER_FILES);
+    Assume.assumeNotNull(networkTransaction);
+    File baseDir = new File("/tmp/R66/scenario_1_2_3/R1/out/");
+    for (int i = 0; i < NUMBER_FILES; i++) {
+      File fileOut = new File(baseDir, "hello" + i);
+      final File outHello = generateOutFile(fileOut.getAbsolutePath(), LARGE_SIZE);
+    }
+    final R66Future future = new R66Future(true);
+    final MultipleSubmitTransfer transaction =
+            new MultipleSubmitTransfer(future, "server2", "hello*", "first",
+                    "test multiple with jump", true, 65536,
+                    DbConstantR66.ILLEGALVALUE, null,
+                    networkTransaction);
+    transaction.setNormalInfoAsWarn(false);
+    transaction.run();
+    future.awaitOrInterruptible();
+    assertTrue(future.isSuccess());
+    long timestart = System.currentTimeMillis();
+    File dirR2 = new File("/tmp/R66/scenario_1_2_3/R2/in");
+    File dirR3 = new File("/tmp/R66/scenario_1_2_3/R3/in");
+    int max = 0;
+    long timestop;
+    if (SERVER1_IN_JUNIT) {
+      InternalRunner internalRunner =
+              Configuration.configuration.getInternalRunner();
+      for (int i = 0; i < NUMBER_FILES * 10; i++) {
+        Thread.sleep(100);
+        if (internalRunner != null) {
+          max = Math.max(max, internalRunner.nbInternalRunner());
+        }
+        int count = dirR3.list().length;
+        if (count == NUMBER_FILES) {
+          break;
+        }
+      }
+      timestop = System.currentTimeMillis();
+      logger.warn(
+              "Sent {} files to R2, then {} to R3, using at most {} parallel clients" +
+                      " ({} seconds,  {} per seconds)", dirR2.list().length,
+              dirR3.list().length, max, (timestop - timestart) / 1000,
+              NUMBER_FILES * 1000 / (timestop - timestart));
+    } else {
+      for (int i = 0; i < NUMBER_FILES * 10; i++) {
+        Thread.sleep(200);
+        int count = dirR3.list().length;
+        if (count == NUMBER_FILES) {
+          break;
+        }
+      }
+      timestop = System.currentTimeMillis();
+      logger.warn(
+              "Sent {} files to R2, then {} to R3 ({} seconds, {} per seconds)",
+              dirR2.list().length, dirR3.list().length,
+              (timestop - timestart) / 1000,
+              NUMBER_FILES * 1000 / (timestop - timestart));
+    }
+    Thread.sleep(1000);
+    FileUtils.forceDeleteRecursiveDir(dirR2);
+    FileUtils.forceDeleteRecursiveDir(dirR3);
+    logger.warn("End {}", Processes.getCurrentMethodName());
+  }
+
+  @Test
   public void test011_SendToItself() throws IOException {
     logger.warn("Start {}", Processes.getCurrentMethodName());
     Assume.assumeNotNull(networkTransaction);
@@ -435,6 +499,7 @@ public abstract class ScenarioBase extends TestAbstract {
       transaction.setNormalInfoAsWarn(false);
       executorService.execute(transaction);
     }
+    logger.warn("End starting {} transfers", NUMBER_FILES);
     Thread.sleep(100);
     executorService.shutdown();
     for (int i = 0; i < NUMBER_FILES; i++) {
@@ -448,6 +513,49 @@ public abstract class ScenarioBase extends TestAbstract {
         "size {} with block size {}", NUMBER_FILES,
         (timestop - timestart) / 1000,
         NUMBER_FILES * 1000 / (timestop - timestart), LARGE_SIZE, BLOCK_SIZE);
+    outHello.delete();
+    FileUtils.forceDeleteRecursiveDir(baseDir);
+    logger.warn("End {}", Processes.getCurrentMethodName());
+  }
+
+  @Test
+  public void test013_MultipleRecvsSync()
+          throws IOException, InterruptedException {
+    logger.warn("Start {} {}", Processes.getCurrentMethodName(), NUMBER_FILES);
+    Assume.assumeNotNull(networkTransaction);
+    File baseDir = new File("/tmp/R66/scenario_1_2_3/R2/out/");
+    File fileOut = new File(baseDir, "hello");
+    final File outHello =
+            generateOutFile(fileOut.getAbsolutePath(), LARGE_SIZE);
+    ArrayList<R66Future> futures = new ArrayList<R66Future>(NUMBER_FILES);
+    ExecutorService executorService =
+            Executors.newFixedThreadPool(NUMBER_FILES);
+    final TestRecvThroughHandler handler = new TestRecvThroughHandler();
+    long timestart = System.currentTimeMillis();
+    for (int i = 0; i < NUMBER_FILES; i++) {
+      final R66Future future = new R66Future(true);
+      futures.add(future);
+      final TestRecvThroughClient transaction =
+              new TestRecvThroughClient(future, handler, "server2-ssl", "hello",
+                      "recvthrough", "Test Multiple RecvThrough",
+                      true, BLOCK_SIZE, networkTransaction);
+      transaction.setNormalInfoAsWarn(false);
+      executorService.execute(transaction);
+    }
+    logger.warn("End starting {} transfers", NUMBER_FILES);
+    Thread.sleep(100);
+    executorService.shutdown();
+    for (int i = 0; i < NUMBER_FILES; i++) {
+      final R66Future future = futures.remove(0);
+      future.awaitOrInterruptible();
+      assertTrue(future.isSuccess());
+    }
+    long timestop = System.currentTimeMillis();
+    logger.warn(
+            "RecvThrough {} files from R2 ({} seconds,  {} per seconds) of " +
+                    "size {} with block size {}", NUMBER_FILES,
+            (timestop - timestart) / 1000,
+            NUMBER_FILES * 1000 / (timestop - timestart), LARGE_SIZE, BLOCK_SIZE);
     outHello.delete();
     FileUtils.forceDeleteRecursiveDir(baseDir);
     logger.warn("End {}", Processes.getCurrentMethodName());

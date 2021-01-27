@@ -324,15 +324,34 @@ public abstract class ScenarioBaseLoop extends TestAbstract {
   @AfterClass
   public static void tearDownAfterClass() throws Exception {
     CloseableHttpClient httpClient = null;
+    int max = SystemPropertyUtil.get(IT_LONG_TEST, false)? 60 : 2000;
+    int totalTransfers = max;
+    int nb = 0;
+    int every10sec = 10;
+    HttpGet request =
+            new HttpGet("http://127.0.0.1:8098/v2/transfers?limit=100000");
+    final long startTime = System.currentTimeMillis();
     try {
       httpClient = HttpClientBuilder.create().setConnectionManagerShared(true)
                                     .disableAutomaticRetries().build();
-      HttpGet request =
-          new HttpGet("http://127.0.0.1:8098/v2/transfers?limit=1000");
       CloseableHttpResponse response = null;
-      int nb = 0;
-      int every10sec = 10;
-      int max = SystemPropertyUtil.get(IT_LONG_TEST, false)? 60 : 20;
+      try {
+        response = httpClient.execute(request);
+        assertEquals(200, response.getStatusLine().getStatusCode());
+        String content = EntityUtils.toString(response.getEntity());
+        ObjectNode node = JsonHandler.getFromString(content);
+        if (node != null) {
+          JsonNode number = node.findValue("totalResults");
+          int newNb = number.asInt();
+          max += newNb;
+          totalTransfers = max;
+          logger.warn("Found {} transfers", newNb);
+        }
+      } finally {
+        if (response != null) {
+          response.close();
+        }
+      }
       while (nb < max) {
         try {
           response = httpClient.execute(request);
@@ -363,7 +382,12 @@ public abstract class ScenarioBaseLoop extends TestAbstract {
         httpClient.close();
       }
     }
+    final long stopTime = System.currentTimeMillis();
+    totalTransfers -= nb;
+    logger.warn("Duration {} for {} item so {} items/s", (stopTime - startTime) / 1000.0, totalTransfers,
+            totalTransfers / ((stopTime - startTime) / 1000.0));
     Configuration.configuration.setTimeoutCon(100);
+    WaarpLoggerFactory.setLogLevel(WaarpLogLevel.ERROR);
     for (int pid : PIDS) {
       Processes.kill(pid, true);
     }
@@ -388,7 +412,7 @@ public abstract class ScenarioBaseLoop extends TestAbstract {
     Runtime runtime = Runtime.getRuntime();
     long newUsedMemory = runtime.totalMemory() - runtime.freeMemory();
     if (newUsedMemory > MAX_USED_MEMORY) {
-      logger.warn("Used Memory > 2GB {} {}", usedMemory / 1048576.0,
+      logger.info("Used Memory > 2GB {} {}", usedMemory / 1048576.0,
                   newUsedMemory / 1048576.0);
     }
   }
@@ -490,6 +514,105 @@ public abstract class ScenarioBaseLoop extends TestAbstract {
     if (SystemPropertyUtil.get(IT_LONG_TEST, false)) {
       testBigTransfer(false, "server2-ssl", true, false, 1024 * 1025 * 1024);
     }
+    logger.warn("End {}", Processes.getCurrentMethodName());
+  }
+
+  @Test
+  public void test03_LoopBigSendsSyncSslNoLimit()
+          throws IOException, InterruptedException {
+    logger.warn("Start {} {}", Processes.getCurrentMethodName(), NUMBER_FILES);
+    int limit = 700;
+    int middleSize = 360 - (limit / 2);
+
+    Assume.assumeNotNull(networkTransaction);
+      Configuration.configuration.changeNetworkLimit(0, 0, 0, 0, 1000);
+    File baseDir = new File("/tmp/R66/scenario_big_file_limitbdw/R1/out/");
+    for (int i = 0; i < limit; i++) {
+      int size = (middleSize + i) * 1024;
+      File fileOut = new File(baseDir, "hello" + size);
+      final File outHello = generateOutFile(fileOut.getAbsolutePath(), size);
+    }
+    logger.warn("End of file creations");
+    long timestart = System.currentTimeMillis();
+    R66Future[] futures = new R66Future[limit];
+    for (int i = 0; i < limit; i++) {
+      int size = (middleSize + i) * 1024;
+      final R66Future future = new R66Future(true);
+      futures[i] = future;
+      final TestTransferNoDb transaction =
+                new TestTransferNoDb(future, "server2-ssl", "hello" + size, "loop",
+                        "Test Loop Send", true, BLOCK_SIZE,
+                        DbConstantR66.ILLEGALVALUE,
+                        networkTransaction);
+      transaction.setNormalInfoAsWarn(false);
+      transaction.run();
+    }
+    for (int i = 0; i < limit; i++) {
+      futures[i].awaitOrInterruptible();
+      assertTrue(futures[i].isSuccess());
+    }
+    //logger.info("Runner: {}", future.getRunner());
+    long timestop = System.currentTimeMillis();
+    logger.warn("Direct {}, Recv {}, LimitBandwidth {} " +
+                    "({} seconds,  {} MBPS vs {} " +
+                    "and {}) of size {} with block size {}", true, false, limit,
+            (timestop - timestart) / 1000,
+            limit * 180*1024 / 1000.0 / (timestop - timestart),
+            Configuration.configuration.getServerGlobalReadLimit() /
+                    1000000.0,
+            Configuration.configuration.getServerChannelReadLimit() /
+                    1000000.0, limit *180*1024, BLOCK_SIZE);
+    checkMemory();
+    logger.warn("End {}", Processes.getCurrentMethodName());
+  }
+
+
+  @Test
+  public void test04_LoopBigSendsSyncNoLimit()
+          throws IOException, InterruptedException {
+    logger.warn("Start {} {}", Processes.getCurrentMethodName(), NUMBER_FILES);
+    int limit = 700;
+    int middleSize = 360 - (limit / 2);
+
+    Assume.assumeNotNull(networkTransaction);
+    Configuration.configuration.changeNetworkLimit(0, 0, 0, 0, 1000);
+    File baseDir = new File("/tmp/R66/scenario_big_file_limitbdw/R1/out/");
+    for (int i = 0; i < limit; i++) {
+      int size = (middleSize + i) * 1024;
+      File fileOut = new File(baseDir, "hello" + size);
+      final File outHello = generateOutFile(fileOut.getAbsolutePath(), size);
+    }
+    logger.warn("End of file creations");
+    long timestart = System.currentTimeMillis();
+    R66Future[] futures = new R66Future[limit];
+    for (int i = 0; i < limit; i++) {
+      int size = (middleSize + i) * 1024;
+      final R66Future future = new R66Future(true);
+      futures[i] = future;
+      final TestTransferNoDb transaction =
+              new TestTransferNoDb(future, "server2", "hello" + size, "loop",
+                      "Test Loop Send", true, BLOCK_SIZE,
+                      DbConstantR66.ILLEGALVALUE,
+                      networkTransaction);
+      transaction.setNormalInfoAsWarn(false);
+      transaction.run();
+    }
+    for (int i = 0; i < limit; i++) {
+      futures[i].awaitOrInterruptible();
+      assertTrue(futures[i].isSuccess());
+    }
+    //logger.info("Runner: {}", future.getRunner());
+    long timestop = System.currentTimeMillis();
+    logger.warn("Direct {}, Recv {}, LimitBandwidth {} " +
+                    "({} seconds,  {} MBPS vs {} " +
+                    "and {}) of size {} with block size {}", true, false, limit,
+            (timestop - timestart) / 1000,
+            limit * 180*1024 / 1000.0 / (timestop - timestart),
+            Configuration.configuration.getServerGlobalReadLimit() /
+                    1000000.0,
+            Configuration.configuration.getServerChannelReadLimit() /
+                    1000000.0, limit *180*1024, BLOCK_SIZE);
+    checkMemory();
     logger.warn("End {}", Processes.getCurrentMethodName());
   }
 

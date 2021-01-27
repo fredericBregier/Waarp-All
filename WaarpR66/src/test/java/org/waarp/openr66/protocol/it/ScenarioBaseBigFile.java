@@ -81,7 +81,7 @@ public abstract class ScenarioBaseBigFile extends TestAbstract {
   private static final String TMP_R66_CONFIG_R1 =
       "/tmp/R66/scenario_big_file_limitbdw/" + SERVER_1_REWRITTEN_XML;
   public static int NUMBER_FILES = 1;
-  public static int LARGE_SIZE = 500000000;
+  public static int LARGE_SIZE = 360 * 1024;// 500000000;
   public static int BANDWIDTH = 10000000;
   public static int BLOCK_SIZE = 65536;
   public static long MAX_USED_MEMORY = 536870912;
@@ -565,6 +565,16 @@ public abstract class ScenarioBaseBigFile extends TestAbstract {
       throws IOException, InterruptedException {
     logger.warn("Start {} {}", Processes.getCurrentMethodName(), NUMBER_FILES);
     testBigTransfer(false, "server2-ssl", true, true);
+    logger.warn("End {}", Processes.getCurrentMethodName());
+  }
+
+  @Test
+  public void test05_BigMultipleRecvSyncSslNoLimit()
+          throws IOException, InterruptedException {
+    logger.warn("Start {} {}", Processes.getCurrentMethodName(), NUMBER_FILES);
+    for (int i = 0; i < 360 ; i++) {
+      testBigTransfer(false, "server2-ssl", true, true);
+    }
     logger.warn("End {}", Processes.getCurrentMethodName());
   }
 
