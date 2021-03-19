@@ -73,7 +73,6 @@ public class NetworkSslServerInitializerProxy
         configuration.getServerChannelReadLimit(),
         configuration.getDelayLimit(), configuration.getTimeoutCon()));
     pipeline.addLast(NETWORK_CODEC, new NetworkPacketCodec());
-    pipeline.addLast(configuration.getHandlerGroup(), NETWORK_HANDLER,
-                     new NetworkSslServerHandler(!isClient));
+    pipeline.addLast(NETWORK_HANDLER, new NetworkSslServerHandler(!isClient));
   }
 }

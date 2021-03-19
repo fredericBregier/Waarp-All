@@ -73,10 +73,15 @@ businessfactorynetwork       String               Nom de classe complet de la Bu
 
 **network**
 serverport                   Integer (6666)       Port utilisé pour les connections en clair
+serveraddresses              String  (null)       Adresses utilisées pour le protocole R66 (séparées par des virgules)
 serversslport                Integer (6667)       Port utilisé pour les connections chiffrées
+serverssladdresses           String  (null)       Adresses utilisées pour le protocole R66 en SSL (séparées par des virgules)
 serverhttpport               Integer (8066)       Port de l'interface HTTP de monitoring, 0 désactive cette interface
+serverhttpaddresses          String  (null)       Adresses utilisées pour l'interface web de supervision (séparées par des virgules)
 serverhttpsport              Integer (8067)       Port de l'interface HTTPS d'administration, 0 désactive cette interface
+serverhttpsaddresses         String  (null)       Adresses utilisées pour l'interface web HTTPS d'administration (séparées par des virgules)
 serverrestport               Integer (-1)         Port de l'API REST HTTP(S), -1 désactive cette interface
+
 
 **ssl** (Optional)
 keypath                      JKS-File             JKS KeyStore pour les accès R66 via SSL (Contient le certificat serveur)
@@ -101,7 +106,7 @@ memorylimit                  Integer (1000000000) Limite mémoire des services H
 sessionlimit                 Integer (1GB)        Limitation de bande passante par session (1GB)
 globallimit                  Integer (100GB)      Limitation de bande passante globale (100GB)
 delaylimit                   Integer (10000)      Interval entre 2 vérification de bande passante
-runlimit                     Integer (1000)       Limite du nombre de transfers actifs (1000)
+runlimit                     Integer (1000)       Limite du nombre de transfers actifs (maximum 10000)
 delaycommand                 Integer (5000)       Interval entre 2 execution du Commander (5s)
 delayretry                   Integer (30000)      Interval avant une nouvelle tentative de transfert en cas d'erreur (30s)
 timeoutcon                   Integer (30000)      Interval avant l'envoie d'un Time Out (30s)
@@ -238,6 +243,7 @@ Il est possible de limiter l'usage de la mémoire en usant des paramètres suiva
    * *chiffres comparés à `SHA-256` (159ms JDK11, 192ms JDK8)*
  * `globaldigest` : Possibilité de le désactiver mais recommandé à `True` (environ 25% de gains)
  * `localdigest` : Possibilité de le désactiver (`False`) (environ 20% de gains)
+ * `runlimit` : Possibilité d'augmenter ou de diminuer la valeur par défaut (1000) entre 1 et 10000 transferts concurrents
 
 La performance d'autres éléments peuvent jouer :
 

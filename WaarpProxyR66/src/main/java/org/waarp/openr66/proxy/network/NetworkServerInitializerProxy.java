@@ -54,8 +54,7 @@ public class NetworkServerInitializerProxy extends NetworkServerInitializer {
         configuration.getServerChannelReadLimit(),
         configuration.getDelayLimit(), configuration.getTimeoutCon()));
     pipeline.addLast(NETWORK_CODEC, new NetworkPacketCodec());
-    pipeline.addLast(configuration.getHandlerGroup(), NETWORK_HANDLER,
-                     new NetworkServerHandler(server));
+    pipeline.addLast(NETWORK_HANDLER, new NetworkServerHandler(server));
   }
 
 }

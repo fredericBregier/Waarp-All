@@ -81,8 +81,6 @@ public class NetworkServerInitializer
         Configuration.configuration.getDelayLimit(),
         Configuration.configuration.getTimeoutCon()));
     pipeline.addLast(NETWORK_CODEC, new NetworkPacketCodec());
-    pipeline
-        .addLast(Configuration.configuration.getHandlerGroup(), NETWORK_HANDLER,
-                 new NetworkServerHandler());
+    pipeline.addLast(NETWORK_HANDLER, new NetworkServerHandler());
   }
 }

@@ -102,11 +102,8 @@ public class NetworkSslServerInitializer
                          Configuration.configuration.getDelayLimit(),
                          Configuration.configuration.getTimeoutCon()));
 
-    pipeline.addLast(NetworkServerInitializer.NETWORK_CODEC,
-                     new NetworkPacketCodec());
-    pipeline.addLast(Configuration.configuration.getHandlerGroup(),
-                     NetworkServerInitializer.NETWORK_HANDLER,
-                     new NetworkSslServerHandler(!isClient));
+    pipeline.addLast(NetworkServerInitializer.NETWORK_CODEC, new NetworkPacketCodec());
+    pipeline.addLast(NetworkServerInitializer.NETWORK_HANDLER, new NetworkSslServerHandler(!isClient));
   }
 
   /**

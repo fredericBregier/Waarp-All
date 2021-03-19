@@ -775,9 +775,9 @@ public class Configuration {
     setRunnerThread(getRunnerThread());
     workerGroup = new NioEventLoopGroup(getClientThread(),
                                         new WaarpThreadFactory("Worker"));
-    handlerGroup = new NioEventLoopGroup(getClientThread(),
+    handlerGroup = new NioEventLoopGroup(getServerThread(),
                                          new WaarpThreadFactory("Handler"));
-    subTaskGroup = new NioEventLoopGroup(getServerThread(),
+    subTaskGroup = new NioEventLoopGroup(getClientThread(),
                                          new WaarpThreadFactory("SubTask"));
     final RejectedExecutionHandler rejectedExecutionHandler =
         new RejectedExecutionHandler() {
@@ -803,8 +803,12 @@ public class Configuration {
           }
         };
 
+    int nbRunnerThread = getRunnerThread();
+    if (nbRunnerThread == 1) {
+      nbRunnerThread = 2;
+    }
     retrieveRunnerGroup =
-        new ThreadPoolRunnerExecutor(getRunnerThread(), getRunnerThread() * 3,
+        new ThreadPoolRunnerExecutor(nbRunnerThread / 2, nbRunnerThread * 3,
                                      1, TimeUnit.SECONDS,
                                      new SynchronousQueue<Runnable>(),
                                      new WaarpThreadFactory("RetrieveRunner"),
