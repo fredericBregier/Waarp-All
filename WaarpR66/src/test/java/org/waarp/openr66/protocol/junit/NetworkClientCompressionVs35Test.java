@@ -20,16 +20,8 @@
 
 package org.waarp.openr66.protocol.junit;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.netty.util.ResourceLeakDetector;
 import io.netty.util.ResourceLeakDetector.Level;
-import org.apache.commons.exec.ExecuteException;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.util.EntityUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.FixMethodOrder;
@@ -42,7 +34,6 @@ import org.waarp.common.database.DbConstant;
 import org.waarp.common.database.exception.WaarpDatabaseException;
 import org.waarp.common.digest.FilesystemBasedDigest;
 import org.waarp.common.file.FileUtils;
-import org.waarp.common.json.JsonHandler;
 import org.waarp.common.utility.ParametersChecker;
 import org.waarp.common.utility.Processes;
 import org.waarp.common.utility.TestWatcherJunit4;
@@ -90,9 +81,12 @@ import org.waarp.openr66.protocol.utils.R66Future;
 import org.waarp.openr66.server.R66Server;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.net.SocketAddress;
+import java.net.URL;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
@@ -105,11 +99,11 @@ import static org.junit.Assert.*;
  *
  */
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
-public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
+public class NetworkClientCompressionVs35Test extends TestAbstract {
   @Rule(order = Integer.MIN_VALUE)
   public TestWatcher watchman = new TestWatcherJunit4();
 
-  private static final boolean SHOULD_COMPRESS = true;
+  private static final boolean SHOULD_COMPRESS = false;
 
   private static final int nbThread = 10;
   private static final ArrayList<DbTaskRunner> dbTaskRunners =
@@ -123,6 +117,9 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
   private static final String LINUX_CONFIG_CONFIG_SERVER_INIT_B_XML =
       "Linux/config/config-serverInitB.xml";
   private static final String CONFIG_CLIENT_A = "config-clientA-compress.xml";
+  private static final String URL_3_5_2_WAARP_R66 =
+      "https://github.com/waarp/Waarp-All/releases/download/v3.5.2/WaarpR66-3.5.2-jar-with-dependencies.jar";
+  private static final String JAR352 = "/tmp/R66/conf/waarpr66-3.5.2.jar";
   private static final List<Integer> PIDS = new ArrayList<Integer>();
   private static int r66Pid1 = 999999;
 
@@ -139,8 +136,15 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
           file2.getAbsolutePath()
       };
       // global ant project settings
+      // First download previous version
+      URL url = new URL(URL_3_5_2_WAARP_R66);
+      InputStream stream = url.openStream();
+      File jar = new File(JAR352);
+      FileOutputStream outputStream = new FileOutputStream(jar);
+      FileUtils.copy(stream, outputStream);
       project = Processes.getProject(homeDir);
-      Processes.executeJvm(project, R66Server.class, argsServer, true);
+      Processes.executeJvmSpecificClasspath(project, jar, R66Server.class,
+                                            argsServer, true);
       int pid = Processes
           .getPidOfRunnerCommandLinux("java", R66Server.class.getName(), PIDS);
       PIDS.add(pid);
@@ -160,7 +164,7 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
   public static void setUpBeforeClass() throws Exception {
     ResourceLeakDetector.setLevel(Level.PARANOID);
     final ClassLoader classLoader =
-        NetworkClientOnlyBothCompressionTest.class.getClassLoader();
+        NetworkClientCompressionVs35Test.class.getClassLoader();
     final File file =
         new File(classLoader.getResource("logback-test.xml").getFile());
     setUpBeforeClassMinimal(LINUX_CONFIG_CONFIG_SERVER_INIT_B_XML);
@@ -228,11 +232,10 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
     }
     try {
       taskRunner.select();
-      logger.warn("isblock {}", taskRunner.isBlockCompression());
       return SHOULD_COMPRESS == taskRunner.isBlockCompression();
     } catch (final WaarpDatabaseException e) {
       logger.error(e.getMessage());
-      return false;
+      return true;
     }
   }
 
@@ -242,7 +245,6 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
     }
     try {
       taskRunner.select();
-      logger.warn("isblock {}", taskRunner.isBlockCompression());
       assertEquals(SHOULD_COMPRESS, taskRunner.isBlockCompression());
     } catch (final WaarpDatabaseException e) {
       fail(e.getMessage());
@@ -382,9 +384,7 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
                     size * 8 / delay);
       }
       // Check is compression correct
-      if (!isCheckCompressionOk(result.getRunner())) {
-        fail("Bad compression");
-      }
+      checkCompression(result.getRunner());
       // In case of success, delete the runner
       dbTaskRunners.add(result.getRunner());
     } else {
@@ -534,131 +534,6 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
     totest.delete();
     assertEquals("Success should be total", nb, success);
     assertEquals("Errors should be 0", 0, error);
-  }
-
-  @Test
-  public void test5_DirectTransferCompressCheck() throws Exception {
-    final File totest = generateOutFile("/tmp/R66/out/testTask.txt", 10000);
-    final R66Future future = new R66Future(true);
-    logger.warn("Start Test of DirectTransferCompressCheck");
-    final long time1 = System.currentTimeMillis();
-    final TestTransferNoDb transaction =
-        new TestTransferNoDb(future, "hostb", "testTask.txt", "rule3compress",
-                             "Test SendDirect Compress #COMPRESS#", true, 8192,
-                             DbConstantR66.ILLEGALVALUE, networkTransaction);
-    transaction.run();
-    int success = 0;
-    int error = 0;
-    future.awaitOrInterruptible();
-    String followId = null;
-    if (future.getRunner() != null) {
-      dbTaskRunners.add(future.getRunner());
-    }
-    if (future.isSuccess() && isCheckCompressionOk(future.getRunner())) {
-      success++;
-    } else {
-      error++;
-    }
-    File to = new File("/tmp/R66/in/testTask.txt");
-    if (totest.length() == to.length()) {
-      success++;
-    } else {
-      logger
-          .error("File sizes differs: {} vs {}", totest.length(), to.length());
-      error++;
-    }
-    final long time2 = System.currentTimeMillis();
-    logger.warn("Success: " + success + " Error: " + error + " NB/s: " +
-                success * 1000 / (time2 - time1));
-    totest.delete();
-
-    assertEquals("Success should be total", 2, success);
-
-    assertEquals("Errors should be 0", 0, error);
-  }
-
-  @Test
-  public void test5_DirectTransferFollowCheck() throws Exception {
-    final File totest = generateOutFile("/tmp/R66/out/testTask.txt", 10);
-    final R66Future future = new R66Future(true);
-    logger.warn("Start Test of DirectTransferFollowCheck");
-    final long time1 = System.currentTimeMillis();
-    final TestTransferNoDb transaction =
-        new TestTransferNoDb(future, "hostb", "testTask.txt", "retransfer",
-                             "Test SendDirect Retransfer #COMPRESS#", true,
-                             8192, DbConstantR66.ILLEGALVALUE,
-                             networkTransaction);
-    transaction.run();
-    int success = 0;
-    int error = 0;
-    future.awaitOrInterruptible();
-    String followId = null;
-    if (future.getRunner() != null) {
-      followId = future.getRunner().getFollowId();
-      dbTaskRunners.add(future.getRunner());
-    }
-    if (future.isSuccess() && isCheckCompressionOk(future.getRunner())) {
-      success++;
-    } else {
-      error++;
-    }
-    if (followId != null) {
-      CloseableHttpClient httpClient = null;
-      try {
-        httpClient = HttpClientBuilder.create().setConnectionManagerShared(true)
-                                      .disableAutomaticRetries().build();
-        HttpGet request = new HttpGet(
-            "http://127.0.0.1:8088/v2/transfers?countOrder=true&followId=" +
-            followId);
-        CloseableHttpResponse response = null;
-        try {
-          int nb = 0;
-          int max = 2;
-          while (nb < max) {
-            response = httpClient.execute(request);
-            if (400 <= response.getStatusLine().getStatusCode()) {
-              break;
-            }
-            String content = EntityUtils.toString(response.getEntity());
-            ObjectNode node = JsonHandler.getFromString(content);
-            if (node != null) {
-              JsonNode number = node.findValue("totalResults");
-              if (number != null) {
-                long newNb = number.asLong();
-                nb = (int) newNb;
-                if (nb >= max) {
-                  success++;
-                  logger.warn("Found {} transfers with followId", newNb);
-                  break;
-                } else {
-                  nb = 0;
-                }
-              }
-            }
-            Thread.sleep(100);
-          }
-        } finally {
-          if (response != null) {
-            response.close();
-          }
-        }
-      } catch (ExecuteException e) {
-        // ignore
-      } finally {
-        if (httpClient != null) {
-          httpClient.close();
-        }
-      }
-    } else {
-      logger.warn("Cannot check FollowId");
-    }
-    final long time2 = System.currentTimeMillis();
-    logger.warn("Success: " + success + " Error: " + error + " NB/s: " +
-                success * 1000 / (time2 - time1));
-    assertEquals("Success should be total", 2, success);
-    assertEquals("Errors should be 0", 0, error);
-    Thread.sleep(1000);
-    totest.delete();
   }
 
   @Test
@@ -845,7 +720,6 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
           return;
         } else if (runner.isInError()) {
           logger.error("DbTaskRunner in error");
-          fail("DbTaskRunner in error");
           return;
         }
         Thread.sleep(100);
@@ -977,7 +851,7 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
         generateOutFile("/tmp/R66/out/testTaskBig.txt", size);
 
     Configuration.configuration
-        .changeNetworkLimit(bandwidth, bandwidth, bandwidth, bandwidth, 500);
+        .changeNetworkLimit(bandwidth, bandwidth, bandwidth, bandwidth, 1000);
 
     final R66Future future = new R66Future(true);
     final long time1 = System.currentTimeMillis();
@@ -997,34 +871,6 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
     bandwidth = 0;
   }
 
-  private void inverseCheckResult(final R66Future future, final long delay,
-                                  final long size) {
-    final R66Result result = future.getResult();
-    if (future.isSuccess()) {
-      if (result.getRunner().getErrorInfo() == ErrorCode.Warning) {
-        logger.warn("Warning with Id: " + result.getRunner().getSpecialId() +
-                    " on file: " +
-                    (result.getFile() != null? result.getFile().toString() :
-                        "no file") + " delay: " + delay + " kbps: " +
-                    size * 8 / delay);
-      } else {
-        logger.warn("Success with Id: " + result.getRunner().getSpecialId() +
-                    " on Final file: " +
-                    (result.getFile() != null? result.getFile().toString() :
-                        "no file") + " delay: " + delay + " kbps: " +
-                    size * 8 / delay);
-      }
-      // Check is compression correct
-      if (isCheckCompressionOk(result.getRunner())) {
-        fail("Bad compression");
-      }
-      // In case of success, delete the runner
-      dbTaskRunners.add(result.getRunner());
-    } else {
-      fail("Error in transfer");
-    }
-  }
-
   @Test
   public void test6_RecvUsingTrafficShaping() throws IOException {
     logger.warn("Start Test of Recv TrafficShaping Transfer");
@@ -1034,7 +880,7 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
         generateOutFile("/tmp/R66/out/testTaskBig.txt", size);
 
     Configuration.configuration
-        .changeNetworkLimit(bandwidth, bandwidth, bandwidth, bandwidth, 500);
+        .changeNetworkLimit(bandwidth, bandwidth, bandwidth, bandwidth, 1000);
 
     final R66Future future = new R66Future(true);
     final long time1 = System.currentTimeMillis();
@@ -1048,62 +894,8 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
     final long time2 = System.currentTimeMillis();
     final long delay = time2 - time1;
     Configuration.configuration.changeNetworkLimit(0, 0, 0, 0, 1000);
-    checkFinalResult(future, future.getResult(), delay, size);
-    totestBig.delete();
-  }
-
-  @Test
-  public void test6_SendUsingTrafficShapingNoCompress() throws IOException {
-    logger.warn("Start Test of Send TrafficShaping Transfer");
-    final int size = 20000;
-    final long bandwidth = 5000;
-    final File totestBig =
-        generateOutFile("/tmp/R66/out/testTaskBig.txt", size);
-
-    Configuration.configuration
-        .changeNetworkLimit(bandwidth, bandwidth, bandwidth, bandwidth, 500);
-
-    final R66Future future = new R66Future(true);
-    final long time1 = System.currentTimeMillis();
-    final TestTransferNoDb transaction =
-        new TestTransferNoDb(future, "hostb", "testTaskBig.txt", "rule3",
-                             "Test SendDirect Big With Traffic Shaping", true,
-                             8192, DbConstantR66.ILLEGALVALUE,
-                             networkTransaction);
-    transaction.run();
-    future.awaitOrInterruptible();
-    final long time2 = System.currentTimeMillis();
-    final long delay = time2 - time1;
-    Configuration.configuration.changeNetworkLimit(0, 0, 0, 0, 1000);
-    inverseCheckResult(future, delay, size);
-    totestBig.delete();
-  }
-
-  @Test
-  public void test6_RecvUsingTrafficShapingNoCompress() throws IOException {
-    logger.warn("Start Test of Recv TrafficShaping Transfer");
-    final int size = 20000;
-    final long bandwidth = 5000;
-    final File totestBig =
-        generateOutFile("/tmp/R66/out/testTaskBig.txt", size);
-
-    Configuration.configuration
-        .changeNetworkLimit(bandwidth, bandwidth, bandwidth, bandwidth, 500);
-
-    final R66Future future = new R66Future(true);
-    final long time1 = System.currentTimeMillis();
-    final TestTransferNoDb transaction =
-        new TestTransferNoDb(future, "hostb", "testTaskBig.txt", "rule4",
-                             "Test RecvDirect Big With Traffic Shaping", true,
-                             8192, DbConstantR66.ILLEGALVALUE,
-                             networkTransaction);
-    transaction.run();
-    future.awaitOrInterruptible();
-    final long time2 = System.currentTimeMillis();
-    final long delay = time2 - time1;
-    Configuration.configuration.changeNetworkLimit(0, 0, 0, 0, 1000);
     final R66Result result = future.getResult();
-    inverseCheckResult(future, delay, size);
+    checkFinalResult(future, result, delay, size);
     totestBig.delete();
   }
 
@@ -1357,6 +1149,78 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
   }
 
   @Test
+  public void test91_ExtraCommandsInformationPacket() throws Exception {
+    final File totest = generateOutFile("/tmp/R66/out/testTask.txt", 10);
+    setUpBeforeClassClient("config-clientB.xml");
+    final DbHostAuth host = new DbHostAuth("hostb");
+    final SocketAddress socketServerAddress;
+    try {
+      socketServerAddress = host.getSocketAddress();
+    } catch (final IllegalArgumentException e) {
+      logger.error("Needs a correct configuration file as first argument");
+      return;
+    }
+    final R66Future futureTransfer = new R66Future(true);
+    final TestTransferNoDb transaction =
+        new TestTransferNoDb(futureTransfer, "hostb", "testTask.txt", "rule3",
+                             "Test SendDirect Small #COMPRESS#", true, 8192,
+                             DbConstantR66.ILLEGALVALUE, networkTransaction);
+    transaction.run();
+    futureTransfer.awaitOrInterruptible();
+    assertTrue("File transfer not ok", futureTransfer.isSuccess());
+    final long id = futureTransfer.getRunner().getSpecialId();
+    logger.warn("Remote Task: {}", id);
+
+    // InformationPacket
+    logger.warn("Start Extra commands: InformationPacket");
+    byte scode = -1;
+    InformationPacket informationPacket =
+        new InformationPacket(String.valueOf(id), scode, "0");
+    R66Future future = new R66Future(true);
+    sendInformation(informationPacket, socketServerAddress, future, scode,
+                    false, R66FiniteDualStates.INFORMATION, true);
+
+    logger.warn("Start Extra commands: ASKEXIST");
+    future = new R66Future(true);
+    scode = (byte) InformationPacket.ASKENUM.ASKEXIST.ordinal();
+    informationPacket = new InformationPacket("rule3", scode, "testTask.txt");
+    sendInformation(informationPacket, socketServerAddress, future, scode, true,
+                    R66FiniteDualStates.INFORMATION, true);
+
+    logger.warn("Start Extra commands: ASKLIST");
+    future = new R66Future(true);
+    scode = (byte) InformationPacket.ASKENUM.ASKLIST.ordinal();
+    informationPacket = new InformationPacket("rule3", scode, "testTask.txt");
+    sendInformation(informationPacket, socketServerAddress, future, scode, true,
+                    R66FiniteDualStates.INFORMATION, true);
+
+    logger.warn("Start Extra commands: ASKMLSDETAIL");
+    future = new R66Future(true);
+    scode = (byte) InformationPacket.ASKENUM.ASKMLSDETAIL.ordinal();
+    informationPacket = new InformationPacket("rule3", scode, "testTask.txt");
+    sendInformation(informationPacket, socketServerAddress, future, scode, true,
+                    R66FiniteDualStates.INFORMATION, true);
+
+    logger.warn("Start Extra commands: ASKMLSLIST");
+    future = new R66Future(true);
+    scode = (byte) InformationPacket.ASKENUM.ASKMLSLIST.ordinal();
+    informationPacket = new InformationPacket("rule3", scode, "testTask.txt");
+    sendInformation(informationPacket, socketServerAddress, future, scode, true,
+                    R66FiniteDualStates.INFORMATION, true);
+
+    // ValidPacket BANDWIDTH
+    logger.warn("Start Extra commands: BANDWIDTHPACKET)");
+    future = new R66Future(true);
+    final ValidPacket valid =
+        new ValidPacket("-1", "-1", LocalPacketFactory.BANDWIDTHPACKET);
+    sendInformation(valid, socketServerAddress, future, scode, true,
+                    R66FiniteDualStates.VALIDOTHER, true);
+
+    setUpBeforeClassClient(CONFIG_CLIENT_A);
+    totest.delete();
+  }
+
+  @Test
   public void test91_MultipleDirectTransfer() throws Exception {
     final File totest = generateOutFile("/tmp/R66/out/testTask.txt", 10);
     final DbHostAuth host = new DbHostAuth("hostb");
@@ -1438,15 +1302,6 @@ public class NetworkClientOnlyBothCompressionTest extends TestAbstract {
     future = new R66Future(true);
     valid = new ValidPacket(Boolean.TRUE.toString(), Boolean.TRUE.toString(),
                             LocalPacketFactory.CONFEXPORTPACKET);
-    sendInformation(valid, socketServerAddress, future, scode, true,
-                    R66FiniteDualStates.VALIDOTHER, true);
-
-    // ValidPacket CONFIMPORTPACKET
-    logger.warn("Start Valid CONFIMPORTPACKET");
-    future = new R66Future(true);
-    valid = new ValidPacket("0 /tmp/R66/arch/hostb_Authentications.xml",
-                            "0 /tmp/R66/arch/hostb.rules.xml",
-                            LocalPacketFactory.CONFIMPORTPACKET);
     sendInformation(valid, socketServerAddress, future, scode, true,
                     R66FiniteDualStates.VALIDOTHER, true);
 
